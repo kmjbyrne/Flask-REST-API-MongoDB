@@ -1,0 +1,9 @@
+
+
+
+
+
+db.games.insert({name: 'Frank', description: 'Test input data'});
+db.games.insert({name: 'Sofia', description: 'Test input data'});
+db.games.insert({name: 'Helmut', description: 'Test input data'});
+db.games.insert({name: 'Muller', description: 'Test input data'});

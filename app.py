@@ -26,6 +26,7 @@ from bson.objectid import ObjectId
 from pymongo import MongoClient
 from lib.collection import Structure
 from lib.errors import *
+import datetime
 
 # HTTP Request Detail
 # TYPE : API Feature
@@ -133,8 +134,38 @@ def linksDefault(path):
     return links
 
 
+
+###############################################################
+###### MongoDB : PyMongo Query Functions ######################
+###############################################################
+
+"""
+
+Below functions handle features of MongoDB Orm PyMongo
+
+"""
+
+def describeObject(obj_name):
+	db = client['FantasyDB']
+	documents = db[obj_name].find()
+	exp = documents.explain()
+	data = []
+
+	for element in documents:
+		for key, value in element.items():
+			try:
+				if('id' in key):
+					data.append(generateNameValuePair(key, str(type(value))))
+				else:
+					data.append(generateNameValuePair(key, str(type(value))))
+			except Exception as e:
+				data.append(generateNameValuePair(key, str(type(value))))
+
+		return data
+	return data
+
 def mongoDBQuery(obj_name):
-		db = client['unicorns']
+		db = client['FantasyDB']
 		cursor = db[obj_name].find()
 
 		db['games'].insert_one(
@@ -152,64 +183,52 @@ def mongoDBQuery(obj_name):
 
 def mongoGetCollections():
 	try:
-		db = client['gamesdb']
+		db = client['FantasyDB']
 		cursor = db.collection_names()
 		return cursor
 	except Exception as e:
 		return None
 
+def mongoInsertData(obj_name, input_data):
+	db = client['FantasyDB']
+	db = db[obj_name]
+	insert_dict = {}
+	for item in input_data['template']['data']:
+		if('date' in item['prompt'] or 'time' in item['prompt']):
+			print(item['value'])
+			parse_out = item['value'].split(",")
+			date_formed = [int(i) for i in parse_out]
+			insert_dict["{0}".format(item['name'])] = datetime.datetime(*date_formed)
+
+		elif(item['prompt'] == 'list'):
+			my_list = item['value'].split(",")
+			insert_dict["{0}".format(item['name'])] = my_list
+
+		else:
+			insert_dict["{0}".format(item['name'])] = item['value']
+	
+	return db.insert(insert_dict)
+	
 def mongoFindOne(collection, uri):
 	db = client['FantasyDB']
-	cursor = db[collection].find({'_id': ObjectId(uri)})
+	id = 0
+	try:
+		id = ObjectId(str(uri))
+	except Exception as e:
+		print(e)
+
+	cursor = db[collection].find({'_id': id})
 	return cursor
 
-def mongoFindAll(collection):
+def mongoFindAll(obj_name):
 	db = client['FantasyDB']
-	cursor = db[collection].find()
+	cursor = db[obj_name].find()
 	return cursor
 
 
-def runSQLQuery(_sql, code):
-	"""Allow for variation in how SQL connection models INSERT's and SELECT's"""
-	"""Division of functionality simply using 0,1,2 code to decide route"""
-	"""No need for commit on SELECT or UPDATE (code 2 -> later revision)"""
-	"""For returning data relating to the structure of a table to order specific"""
-	"""Insert queries on POST"""
-	con = mysql.connector.connect(host=host, user=user, password=password, database=db)
-	cursor = con.cursor()
-
-	if code == 0:
-    	# All select queries here
-		try:
-			cursor.execute(_sql)
-			data = cursor.fetchall()
-			return data
-		except Exception as e:
-			return e
-
-	elif code == 1: 
-    	#All insert queries here
-		try:
-			cursor.execute(_sql)
-			con.commit()
-			last_id = cursor.lastrowid
-			return {'code': True, 'msg': last_id} 
-		except Exception as e:
-			return {'code': False, 'msg': e}
-	elif code == 2:
-		#All special describe queries here
-		try:
-			data = {}
-			cursor.execute(_sql)
-			data['rows'] = cursor.fetchall()
-			data['columns'] = cursor.description
-			return data
-		except Exception as e:
-			return False
+##############################################################
 
 
-	cursor.close()
-	con.close()
 
 def generateError(title, code, message):
 	item = {}
@@ -219,18 +238,6 @@ def generateError(title, code, message):
 
 	return item
 
-def generateDynamicItem(columns, data):
-	items = []
-	counter = 0
-	outer = 0
-
-	for i in data:
-		for x in i:
-			dict = {'value': x[0]}
-			items.append(dict)
-
-	return jsonify(items)
-
 def packageResponse(data):
 	resp = jsonify(data.getCollection())
 	resp.status_code = 200
@@ -238,11 +245,11 @@ def packageResponse(data):
 	resp.content_type = content_type
 	return resp
 
-def returnTemplateFromData(collection):
+def returnTemplateFromData(obj_name):
 	template = {}
 	data = []
-
-	documents = mongoFindAll('unicorns')
+	db = client['FantasyDB']
+	documents = db[obj_name].find()
 
 	for element in documents:
 		for key, value in element.items():
@@ -252,78 +259,34 @@ def returnTemplateFromData(collection):
 				item = {}
 				item['prompt'] = ""
 				item['name'] = key
-			
+
 				if(type(value) is list):
-					item['value'] = []
-				else:
+					item['prompt'] = "list"
+					item['value'] = '[]'
+				elif(type(value) is tuple):
+					item['prompt'] = "tuple"
+					item['value'] = "()"
+				elif(type(value) is dict):
+					item['prompt'] = "dictionary"
+					item['value'] = '{}'
+				elif(type(value) is int):
+					item['prompt'] = "int"
+					item['value'] = 0
+				elif(type(value) is float):
+					item['prompt'] = "float"
+					item['value'] = 0.0
+				elif(type(value) is str):
+					item['prompt'] = "text"
 					item['value'] = ""
+				elif(isinstance(value, datetime.datetime)):
+					item['prompt'] = "datetime XXXX, XX, XX, XX, XX, XX"
+					item['value'] = datetime.datetime(1700, 1, 1, 1, 1, 1)
 
 				data.append(item)
 
 		template['data'] = data
 		return template
 	return template
-
-def generateTemplate(table_name):
-	#Essentially describing table
-	#Returning column types and 
-	#Column names for INSERT reference
-	template = {}
-	data = []
-	tables = [table_name]
-	description = describeOne(table_name)
-
-	for i in description:
-		if(i[0] == 'id' or 'on update' in i[5] or 'auto_increment' in i[5]):
-			pass
-		else:
-			item = {}
-			item['prompt'] = "type " + i[1]
-			item['name'] = i[0]
-			item['value'] = ""
-			data.append(item)
-
-	template['data'] = data
-
-	return template
-
-def getTables():
-	query = "SHOW TABLES"
-	tables = runSQLQuery(query, 0)
-	return tables
-
-def describeOne(table):
-	query = "DESCRIBE {0}".format(table)
-	return runSQLQuery(query, 0)
-	
-def describeTables(url, list_of_tables):
-	"""Returns a global set of info relating"""
-	"""to tables given [parameter list]"""
-	items = []
-	data = []
-
-	for x in list_of_tables:
-		query = "DESCRIBE {0}".format(x)
-		query_results = runSQLQuery(query, 2)
-		headers = query_results['columns']
-
-		item = {}
-		item['href'] = url
-		item['data'] = []
-		
-		for i in query_results['rows']:	
-			counter = 0
-			sub_item = {}
-			sub_item['href'] = getCurrentPath(url, "/table/post/players/" + i[0])
-			sub_item['data'] = []
-			inner_data = []
-			for col in i:
-				sub_item['data'].append(generateNameValuePair(headers[counter][0], col))
-				counter = counter + 1
-
-			items.append(sub_item)
-		#items.append(item)
-	return items
 
 def generateNameValuePair(name, value):
 	item = {}
@@ -402,12 +365,9 @@ def createDatabase(db_name):
 
 @app.route('/table/list', methods=['GET'])
 def getTableList():
-
 	url = request.url
 	collection = Structure(url)
 	results = mongoGetCollections()
-
-	print(results)
 
 	for i in results:
 		item = {}
@@ -418,25 +378,27 @@ def getTableList():
 
 	return packageResponse(collection)
 
-@app.route('/table/post/<table>', methods=['GET', 'POST'])
-def tableRoute(table):
+@app.route('/table/post/<input_collection>', methods=['GET', 'POST'])
+def tableRoute(input_collection):
 	"""table/structure & table/post merged into one method"""
 	url = request.url
 	collection = Structure(url)
 
 	if(request.method == 'GET'):
-		dbs = [table]	
-		collection.setItems(describeTables(url, dbs))
-		link = getCurrentPath(url, '/table/post/' + table)
-
+		collection.setItems(describeObject(input_collection))
+		link = getCurrentPath(url, '/table/post/' + input_collection)
 		collection.appendLink(generateLink(link, 'post'))
-		collection.setPostTemplate(generateTemplate(table))
-
+		collection.setPostTemplate(returnTemplateFromData(input_collection))
 		return packageResponse(collection)
 
 	elif(request.method == 'POST'):
 		try:
-			dict_data = None
+			collections = mongoGetCollections()
+			if(input_collection not in collections):
+				collection.setError(getError(-1, "Collection does not exist!"))
+				return packageResponse(collection)
+
+			data = None
 			try:
 				data = json.dumps(request.get_json())
 				dict_data = json.loads(data)
@@ -445,54 +407,21 @@ def tableRoute(table):
 
 			except Exception as e:
 				collection.setError(getError(1, e))
-				collection.setPostTemplate(generateTemplate(table))
+				collection.setPostTemplate(returnTemplateFromData(input_collection))
 				return packageResponse(collection)
 
-			columns = ""
-			counter = 0
-			for col in dict_data['template']['data']:
-				if(counter == 0):
-					columns += (col['name'])
-				else:
-					columns += (", " + col['name'] + "")
-				counter = counter + 1
+			#Insert to MongoDB - template data
+			last_id = str(mongoInsertData(input_collection, dict_data))
 
-			query = ['INSERT ', 'INTO ', table, '(', columns, ')', ' values ', '(']
-
-			inputs = 0
-			for item in dict_data['template']['data']:
-				if(item['name'] != 'id'):
-					if(inputs == 0):
-						query.append(appendByType(item))
-
-					else:
-						query.append(", " + appendByType(item))
-
-					inputs = inputs + 1
-
-			query.append(')')
-			query = ''.join(query)
-			status = ""
-			try:
-				status = runSQLQuery(query, 1)
-			except Exception as e:
-				collection.setError(getError(2, status['msg']))
-				return packageResponse(collection)
-
-			if(status['code'] != False):
-				link = getCurrentPath(url, "/table/showall/" + table)
-				collection.appendLink(generateLink(link, 'showall'))
-				link = getCurrentPath(url, "/table/showone/" + table + "/" + str(status['msg']))
-				collection.appendLink(generateLink(link, 'showone'))
-				return packageResponse(collection)
-
-			else:
-				collection.setError(getError(2, str(status['msg'])))
-				return packageResponse(collection)
+			link = getCurrentPath(url, "/table/showall/" + input_collection)
+			collection.appendLink(generateLink(link, 'showall'))
+			link = getCurrentPath(url, "/table/showone/" + input_collection + "/" + last_id)
+			collection.appendLink(generateLink(link, 'showone'))
+			return packageResponse(collection)
 
 		except Exception as e:
 			collection.setError(getError(-1, e))
-			collection.setPostTemplate(generateTemplate(table))
+			#scollection.setPostTemplate(generateTemplate(input_collection))
 			return packageResponse(collection)
 
 @app.route('/table/showone/<input_collection>/<id>', methods=['GET'])
@@ -507,20 +436,18 @@ def showone(input_collection, id):
 	#query = "SELECT * FROM {0} WHERE {1} = {2}".format(table, columns[0][0], id)
 	#rows = runSQLQuery(query, 0)
 	
-	documents = mongoFindOne(input_collection, id)
+	document = mongoFindOne(input_collection, id)
 
 	item = {}
-	data = []
 	mod_path = '/table/showone/' + input_collection + '/' + id
 	item['href'] = getCurrentPath(url, mod_path)
-	#row_item={}
 	row_item_data = []
 	counter=0
 
-	if documents is None:
+	if document is None:
 		collection.setError(getError(3, ""))
 	else:
-		for element in documents:
+		for element in document:
 			for key, value in element.items():
 				if('id' in key):
 					row_item_data.append(generateNameValuePair(key, str(value)))
@@ -559,7 +486,6 @@ def showallByColumn(table, column):
 def showall(input_collection):
 	url = request.url
 	collection = Structure(url)
-	#results = mongo_db[table].find()
 	documents = mongoFindAll(input_collection)
 
 	collection_exists = False
@@ -569,13 +495,15 @@ def showall(input_collection):
 		collection_exists = True
 		item = {}
 		data = []
-		item['href'] = element
-		item['data'] = []
 		for key, value in element.items():
 			if('id' in key):
-				mod_path = '/table/showall/' + input_collection + '/' + str(value)
+				mod_path = '/table/showone/' + input_collection + '/' + str(value)
 				item['href'] = getCurrentPath(url, mod_path)
-				data.append(generateNameValuePair(key, str(value)))
+				data.append(generateNameValuePair('id', str(value)))
+			
+			elif(type(value) is list):
+				list_values = ', '.join(map(str, value))
+				data.append(generateNameValuePair(key, list_values))
 			else:
 				data.append(generateNameValuePair(key, value))
 
@@ -585,10 +513,7 @@ def showall(input_collection):
 	if(collection_exists == False):
 		collection.setError(getError(-1, "Collection does not exist!"))
 	else:
-		#if(data_exists == False):
-		#	collection.setError(getError(-1, "No documents exist within collection!"))
-		#else:
-		collection.setPostTemplate(returnTemplateFromData(documents))
+		collection.setPostTemplate(returnTemplateFromData(input_collection))
 	        
 	return packageResponse(collection)
 
